@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Geometry Wars</title>
+<title>Neon Vector</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#000;overflow:hidden;cursor:none}
@@ -1629,7 +1629,10 @@ class Game{
     ctx.textAlign='center';
     ctx.font='bold 68px "Courier New",monospace';
     ctx.fillStyle='#ffffff'; ctx.shadowColor='#8888ff'; ctx.shadowBlur=40;
-    ctx.fillText('GEOMETRY WARS',W/2,H/2-80);
+    ctx.fillText('NEON VECTOR',W/2,H/2-90);
+    ctx.font='16px "Courier New",monospace'; ctx.shadowColor='#aaaaff'; ctx.shadowBlur=14;
+    ctx.fillStyle='#9999cc';
+    ctx.fillText('A Geometry Wars-like Shooter',W/2,H/2-52);
 
     ctx.font='16px "Courier New",monospace'; ctx.shadowBlur=6; ctx.fillStyle='#8899aa';
     ctx.fillText('WASD ── 移動 (自機が向きを変える)',    W/2, H/2-10);
