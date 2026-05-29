@@ -368,6 +368,10 @@ function _initAudio(){
     _ac=new(window.AudioContext||window.webkitAudioContext)();
     _bgmG=_ac.createGain(); _bgmG.gain.value=0.42; _bgmG.connect(_ac.destination);
     _sfxG=_ac.createGain(); _sfxG.gain.value=0.82; _sfxG.connect(_ac.destination);
+    // Play silent buffer — unlocks audio on iOS Safari and Chrome autoplay policy
+    const buf=_ac.createBuffer(1,1,22050);
+    const src=_ac.createBufferSource(); src.buffer=buf;
+    src.connect(_ac.destination); src.start(0);
   }catch(e){ _ac=null; }
 }
 function _resumeAC(){ if(_ac&&_ac.state==='suspended') _ac.resume(); }
@@ -458,13 +462,13 @@ function toggleMute(){
 function sfxShoot(){
   if(!_ac) return;
   const t=_ac.currentTime;
-  if(t-_lastShot<0.065) return; _lastShot=t;  // throttle rapid-fire clicks
+  if(t-_lastShot<0.065) return; _lastShot=t;
   const o=_ac.createOscillator(), g=_ac.createGain();
   o.type='sine';
   o.frequency.setValueAtTime(900,t); o.frequency.exponentialRampToValueAtTime(1600,t+0.05);
   o.connect(g); g.connect(_sfxG);
   g.gain.setValueAtTime(0.22,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.07);
-  o.start(t); o.stop(t+0.08);
+  o.start(); o.stop(t+0.08);
 }
 function sfxEnemyShoot(){
   if(!_ac) return;
@@ -474,7 +478,7 @@ function sfxEnemyShoot(){
   o.frequency.setValueAtTime(280,t); o.frequency.exponentialRampToValueAtTime(140,t+0.10);
   o.connect(g); g.connect(_sfxG);
   g.gain.setValueAtTime(0.18,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.12);
-  o.start(t); o.stop(t+0.13);
+  o.start(); o.stop(t+0.13);
 }
 function sfxExplode(big=false){
   if(!_ac) return;
@@ -486,14 +490,14 @@ function sfxExplode(big=false){
   f.frequency.exponentialRampToValueAtTime(40,t+dur);
   s.connect(f); f.connect(g); g.connect(_sfxG);
   g.gain.setValueAtTime(big?1.1:0.55,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur);
-  s.start(t); s.stop(t+dur+0.05);
+  s.start(); s.stop(t+dur+0.05);
   // Tonal sub-boom
   const o=_ac.createOscillator(), og=_ac.createGain();
   o.type='sine'; o.frequency.setValueAtTime(big?70:110,t);
   o.frequency.exponentialRampToValueAtTime(18,t+dur);
   o.connect(og); og.connect(_sfxG);
   og.gain.setValueAtTime(big?0.90:0.45,t); og.gain.exponentialRampToValueAtTime(0.001,t+dur);
-  o.start(t); o.stop(t+dur+0.05);
+  o.start(); o.stop(t+dur+0.05);
 }
 function sfxPlayerDie(){
   if(!_ac) return;
@@ -504,7 +508,7 @@ function sfxPlayerDie(){
   o.frequency.exponentialRampToValueAtTime(12,t+0.9);
   o.connect(g); g.connect(_sfxG);
   g.gain.setValueAtTime(0.55,t); g.gain.exponentialRampToValueAtTime(0.001,t+1.0);
-  o.start(t); o.stop(t+1.05);
+  o.start(); o.stop(t+1.05);
 }
 function sfxBlackHoleHit(){
   if(!_ac) return;
@@ -514,7 +518,7 @@ function sfxBlackHoleHit(){
   o.frequency.exponentialRampToValueAtTime(45,t+0.22);
   o.connect(g); g.connect(_sfxG);
   g.gain.setValueAtTime(0.55,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.25);
-  o.start(t); o.stop(t+0.26);
+  o.start(); o.stop(t+0.26);
 }
 function sfxEvent(){
   if(!_ac) return;
@@ -526,7 +530,7 @@ function sfxEvent(){
   g.gain.setValueAtTime(0.0,t);
   g.gain.linearRampToValueAtTime(0.38,t+0.04);
   g.gain.exponentialRampToValueAtTime(0.001,t+0.38);
-  o.start(t); o.stop(t+0.40);
+  o.start(); o.stop(t+0.40);
 }
 
 // ─── Bullets ──────────────────────────────────────────────────────────────────
@@ -1679,7 +1683,11 @@ let game=new Game(); game.state='menu';
 
 function startGame(){
   if(game.state==='menu'||game.state==='gameover'){
-    _initAudio(); stopBGM(); game=new Game(); startBGM();
+    _initAudio();
+    stopBGM();
+    game=new Game();
+    // Use promise so BGM starts only after AudioContext is confirmed running
+    if(_ac) _ac.resume().then(startBGM).catch(startBGM);
   }
 }
 window.addEventListener('keydown', e=>{ if(game.state==='menu'||game.state==='gameover') startGame(); });
