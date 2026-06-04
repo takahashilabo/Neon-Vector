@@ -258,60 +258,39 @@ function updateParticles(dt){
 }
 
 // ─── WebGL Particle Renderer ──────────────────────────────────────────────────
-// Pass A — GL_POINTS  : soft radial-glow blobs for burst/ring/trail particles
-// Pass B — GL_LINES   : head→tail streaks for hot spark particles (Geometry Wars look)
-// Pass C — GL_POINTS  : bright white-hot tips at spark heads
+// Single GL_POINTS program for everything.
+// Sparks: emit 8 overlapping points per particle along the 1-frame travel path
+// (tail→head gradient, growing size & alpha) → solid luminous streak illusion.
+// gl.lineWidth is capped at 1px in WebGL and unusable; multi-point is the fix.
 const _glc = document.createElement('canvas');
-let _gl=null;
-// Point program  (7 floats/vert: x y size r g b a)
-let _glProg=null, _glBuf=null, _glVerts=null;
+let _gl=null, _glProg=null, _glBuf=null, _glVerts=null;
 let _glResLoc=null, _glLp=-1, _glLs=-1, _glLc=-1;
-// Line program   (6 floats/vert: x y r g b a)
-let _glProg2=null, _glBuf2=null, _glVerts2=null;
-let _glRL2=null, _glLA2=-1, _glLC2=-1;
 
 (function initGL(){
   try{
     _gl=_glc.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false,preserveDrawingBuffer:true});
     if(!_gl) return;
     const gl=_gl;
-    function mkS(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
-
-    // ── Program 1: GL_POINTS with radial soft glow ──
-    const vs1=`attribute vec2 ap;attribute float asz;attribute vec4 ac;varying vec4 vc;uniform vec2 ur;
+    const vs=`attribute vec2 ap;attribute float asz;attribute vec4 ac;varying vec4 vc;uniform vec2 ur;
 void main(){vec2 cl=ap/ur*2.0-1.0;gl_Position=vec4(cl.x,-cl.y,0,1);gl_PointSize=asz;vc=ac;}`;
-    const fs1=`precision mediump float;varying vec4 vc;
+    const fs=`precision mediump float;varying vec4 vc;
 void main(){float d=length(gl_PointCoord-vec2(.5))*2.;if(d>1.)discard;
 float a=pow(1.-d,2.)*vc.a;gl_FragColor=vec4(vc.rgb*a,a);}`;
+    function mkS(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
     _glProg=gl.createProgram();
-    gl.attachShader(_glProg,mkS(gl.VERTEX_SHADER,vs1));
-    gl.attachShader(_glProg,mkS(gl.FRAGMENT_SHADER,fs1));
+    gl.attachShader(_glProg,mkS(gl.VERTEX_SHADER,vs));
+    gl.attachShader(_glProg,mkS(gl.FRAGMENT_SHADER,fs));
     gl.linkProgram(_glProg);
     _glBuf=gl.createBuffer();
-    _glVerts=new Float32Array(MAX_P*2*7);
+    // Buffer: regular particles (2 passes × MAX_P × 7) + spark trail (8 steps × 2 × MAX_P × 7)
+    _glVerts=new Float32Array(MAX_P*20*7);
     _glResLoc=gl.getUniformLocation(_glProg,'ur');
     _glLp=gl.getAttribLocation(_glProg,'ap');
     _glLs=gl.getAttribLocation(_glProg,'asz');
     _glLc=gl.getAttribLocation(_glProg,'ac');
-
-    // ── Program 2: GL_LINES for spark streaks (head white-hot, tail dim enemy-color) ──
-    const vs2=`attribute vec2 ap;attribute vec4 ac;varying vec4 vc;uniform vec2 ur;
-void main(){vec2 cl=ap/ur*2.0-1.0;gl_Position=vec4(cl.x,-cl.y,0,1);vc=ac;}`;
-    const fs2=`precision mediump float;varying vec4 vc;
-void main(){gl_FragColor=vec4(vc.rgb*vc.a,vc.a);}`;
-    _glProg2=gl.createProgram();
-    gl.attachShader(_glProg2,mkS(gl.VERTEX_SHADER,vs2));
-    gl.attachShader(_glProg2,mkS(gl.FRAGMENT_SHADER,fs2));
-    gl.linkProgram(_glProg2);
-    _glBuf2=gl.createBuffer();
-    _glVerts2=new Float32Array(MAX_P*2*6); // 2 verts/spark × 6 floats
-    _glRL2=gl.getUniformLocation(_glProg2,'ur');
-    _glLA2=gl.getAttribLocation(_glProg2,'ap');
-    _glLC2=gl.getAttribLocation(_glProg2,'ac');
   }catch(e){_gl=null;console.warn('WebGL unavailable, falling back to Canvas 2D');}
 })();
 
-// Bind point-program state (call after any resize or program switch)
 function _glBindState(){
   if(!_gl) return;
   const gl=_gl;
@@ -324,24 +303,13 @@ function _glBindState(){
   gl.vertexAttribPointer(_glLc,4,gl.FLOAT,false,s,12);
   gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
 }
-// Bind line-program state
-function _glBindLine(){
-  if(!_gl||!_glProg2) return;
-  const gl=_gl;
-  gl.useProgram(_glProg2);
-  gl.bindBuffer(gl.ARRAY_BUFFER,_glBuf2);
-  const s=6*4;
-  gl.enableVertexAttribArray(_glLA2); gl.enableVertexAttribArray(_glLC2);
-  gl.vertexAttribPointer(_glLA2,2,gl.FLOAT,false,s,0);
-  gl.vertexAttribPointer(_glLC2,4,gl.FLOAT,false,s,8);
-}
 
 function _resizeGL(){
   if(!_gl) return;
-  _glc.width=W; _glc.height=H;  // resets GL context — must rebind everything
-  _glBindState(); _gl.viewport(0,0,W,H); _gl.uniform2f(_glResLoc,W,H);
-  if(_glProg2){ _glBindLine(); _gl.uniform2f(_glRL2,W,H); }
-  _glBindState(); // leave in point-program state
+  _glc.width=W; _glc.height=H;
+  _glBindState();
+  _gl.viewport(0,0,W,H);
+  _gl.uniform2f(_glResLoc,W,H);
 }
 
 function drawParticles(){
@@ -364,11 +332,11 @@ function drawParticles(){
 function _drawGL(){
   const gl=_gl;
   gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
-
-  // ── Pass A: GL_POINTS — burst/ring/trail particles (non-spark) ──────────────
   _glBindState(); gl.uniform2f(_glResLoc,W,H);
   let vi=0;
-  for(let i=0;i<pActive;i++){           // halo
+
+  // ── Regular particles (burst / ring / trail) — halo pass ──────────────────
+  for(let i=0;i<pActive;i++){
     const p=pool[i]; if(p.spark) continue;
     const sx=p.wx-camX,sy=p.wy-camY;
     if(sx<-100||sx>W+100||sy<-100||sy>H+100) continue;
@@ -376,7 +344,8 @@ function _drawGL(){
     _glVerts[vi++]=sx; _glVerts[vi++]=sy; _glVerts[vi++]=sz*8.5;
     _glVerts[vi++]=p.r/255; _glVerts[vi++]=p.g/255; _glVerts[vi++]=p.b/255; _glVerts[vi++]=p.life*0.14;
   }
-  for(let i=0;i<pActive;i++){           // bright core
+  // ── Regular particles — bright core pass ───────────────────────────────────
+  for(let i=0;i<pActive;i++){
     const p=pool[i]; if(p.spark) continue;
     const sx=p.wx-camX,sy=p.wy-camY;
     if(sx<-20||sx>W+20||sy<-20||sy>H+20) continue;
@@ -385,47 +354,38 @@ function _drawGL(){
     _glVerts[vi++]=Math.min(1,p.r/255+0.28); _glVerts[vi++]=Math.min(1,p.g/255+0.28);
     _glVerts[vi++]=Math.min(1,p.b/255+0.28); _glVerts[vi++]=p.life*0.92;
   }
-  if(vi>0){ gl.bufferData(gl.ARRAY_BUFFER,_glVerts.subarray(0,vi),gl.DYNAMIC_DRAW); gl.drawArrays(gl.POINTS,0,vi/7); }
 
-  // ── Pass B: GL_LINES — spark streaks (tail=dim enemy-color, head=white-hot) ─
-  if(_glProg2){
-    _glBindLine(); gl.uniform2f(_glRL2,W,H);
-    let vi2=0;
-    for(let i=0;i<pActive;i++){
-      const p=pool[i]; if(!p.spark) continue;
-      const sx=p.wx-camX, sy=p.wy-camY;
-      const px=p.prevWx-camX, py=p.prevWy-camY;
-      if(sx<-200&&px<-200||sx>W+200&&px>W+200) continue;
-      if(sy<-200&&py<-200||sy>H+200&&py>H+200) continue;
-      const l=p.life;
-      // tail vertex — dim enemy color (nearly invisible)
-      _glVerts2[vi2++]=px; _glVerts2[vi2++]=py;
-      _glVerts2[vi2++]=p.r/255*0.25; _glVerts2[vi2++]=p.g/255*0.25; _glVerts2[vi2++]=p.b/255*0.25; _glVerts2[vi2++]=l*0.04;
-      // head vertex — searing white (yellow-white for hot metal look)
-      _glVerts2[vi2++]=sx; _glVerts2[vi2++]=sy;
-      _glVerts2[vi2++]=1.0; _glVerts2[vi2++]=0.96; _glVerts2[vi2++]=0.80; _glVerts2[vi2++]=l*0.97;
+  // ── Spark trail — 8 GL_POINTS per spark along prev→curr path ──────────────
+  // WebGL gl.lineWidth is capped at 1px everywhere; this multi-point approach
+  // creates solid luminous streaks by overlapping soft circles along the path.
+  // t goes from tail(0) to head(1): size & alpha grow, color lerps to white-hot.
+  const STEPS=8;
+  for(let i=0;i<pActive;i++){
+    const p=pool[i]; if(!p.spark) continue;
+    const sx=p.wx-camX, sy=p.wy-camY;
+    const px=p.prevWx-camX, py=p.prevWy-camY;
+    if(sx<-140&&px<-140||sx>W+140&&px>W+140) continue;
+    if(sy<-140&&py<-140||sy>H+140&&py>H+140) continue;
+    const dx=sx-px, dy=sy-py;
+    const cr=p.r/255, cg=p.g/255, cb=p.b/255, l=p.life;
+    for(let s=0;s<STEPS;s++){
+      const t=(s+1)/STEPS;   // 1/8 … 1.0  (skip t=0 so tail is nearly invisible)
+      const t2=t*t;
+      const x=px+dx*t, y=py+dy*t;
+      // Colored glow — small at tail, blooms at head
+      _glVerts[vi++]=x; _glVerts[vi++]=y; _glVerts[vi++]=(1.2+t*13)*l;
+      _glVerts[vi++]=cr; _glVerts[vi++]=cg; _glVerts[vi++]=cb; _glVerts[vi++]=t2*l*0.22;
+      // White-hot core — enemy color at tail, pure yellow-white at head
+      _glVerts[vi++]=x; _glVerts[vi++]=y; _glVerts[vi++]=(0.5+t*5.5)*l;
+      _glVerts[vi++]=cr+(1-cr)*t2; _glVerts[vi++]=cg+(1-cg)*t2; _glVerts[vi++]=cb+(1-cb)*t2*0.7;
+      _glVerts[vi++]=Math.pow(t,1.4)*l*0.96;
     }
-    if(vi2>0){ gl.bufferData(gl.ARRAY_BUFFER,_glVerts2.subarray(0,vi2),gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES,0,vi2/6); }
-
-    // ── Pass C: GL_POINTS — glowing tips at spark heads ──────────────────────
-    _glBindState(); gl.uniform2f(_glResLoc,W,H);
-    vi=0;
-    for(let i=0;i<pActive;i++){
-      const p=pool[i]; if(!p.spark) continue;
-      const sx=p.wx-camX, sy=p.wy-camY;
-      if(sx<-40||sx>W+40||sy<-40||sy>H+40) continue;
-      const sz=p.size*p.life, l=p.life;
-      // colored halo at tip
-      _glVerts[vi++]=sx; _glVerts[vi++]=sy; _glVerts[vi++]=sz*11;
-      _glVerts[vi++]=p.r/255; _glVerts[vi++]=p.g/255; _glVerts[vi++]=p.b/255; _glVerts[vi++]=l*0.13;
-      // white-hot core at tip
-      _glVerts[vi++]=sx; _glVerts[vi++]=sy; _glVerts[vi++]=sz*3.5;
-      _glVerts[vi++]=1.0; _glVerts[vi++]=0.98; _glVerts[vi++]=0.85; _glVerts[vi++]=l*0.90;
-    }
-    if(vi>0){ gl.bufferData(gl.ARRAY_BUFFER,_glVerts.subarray(0,vi),gl.DYNAMIC_DRAW); gl.drawArrays(gl.POINTS,0,vi/7); }
   }
 
-  // Composite GL canvas onto main canvas (additive)
+  if(vi===0) return;
+  gl.bufferData(gl.ARRAY_BUFFER,_glVerts.subarray(0,vi),gl.DYNAMIC_DRAW);
+  gl.drawArrays(gl.POINTS,0,vi/7);
+  // Composite onto main canvas with additive blending
   ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.drawImage(_glc,0,0); ctx.restore();
 }
 
