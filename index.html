@@ -188,17 +188,18 @@ class Grid {
 }
 
 // ─── Particles ────────────────────────────────────────────────────────────────
-const MAX_P = 3500;
+const MAX_P = 4000;
 const pool  = new Array(MAX_P);
-for(let i=0;i<MAX_P;i++) pool[i]={life:0};
+for(let i=0;i<MAX_P;i++) pool[i]={life:0, spark:false, prevWx:0, prevWy:0};
 let pActive = 0;
 
-function _addParticle(wx,wy,vx,vy,r,g,b,size,decay,friction=0.97){
+function _addParticle(wx,wy,vx,vy,r,g,b,size,decay,friction=0.97,spark=false){
   if(pActive>=MAX_P) return;
   const p=pool[pActive++];
   p.wx=wx; p.wy=wy; p.vx=vx; p.vy=vy;
   p.r=r; p.g=g; p.b=b;
   p.size=size; p.life=1; p.decay=decay; p.friction=friction;
+  p.spark=spark; p.prevWx=wx; p.prevWy=wy;
 }
 
 function spawnBurst(wx,wy,hex,count,sMin=80,sMax=320,szMin=1.5,szMax=5){
@@ -212,16 +213,15 @@ function spawnBurst(wx,wy,hex,count,sMin=80,sMax=320,szMin=1.5,szMax=5){
   }
 }
 
-// Fast long-range streamer shards — low friction so they shoot far across the screen
-function spawnShards(wx,wy,hex,count=18,spMin=380,spMax=900){
+// Hot metal sparks — rendered as GL_LINES (tail→head streaks), very high speed
+function spawnSparks(wx,wy,hex,count=28,spMin=580,spMax=1380){
   const r=parseInt(hex.slice(1,3),16);
   const g=parseInt(hex.slice(3,5),16);
   const b=parseInt(hex.slice(5,7),16);
   for(let i=0;i<count;i++){
     const sp=rand(spMin,spMax), a=rand(0,TAU);
-    // Low decay (long life) + low friction (barely slows down) = travels far
     _addParticle(wx,wy, Math.cos(a)*sp, Math.sin(a)*sp,
-                 r,g,b, rand(1.0,2.8), rand(0.38,0.75), 0.986);
+                 r,g,b, rand(1.2,2.8), rand(0.38,0.68), 0.989, true); // spark=true
   }
 }
 
@@ -249,6 +249,7 @@ function spawnTrail(wx,wy,hex,sz=2){
 function updateParticles(dt){
   for(let i=pActive-1;i>=0;i--){
     const p=pool[i];
+    if(p.spark){ p.prevWx=p.wx; p.prevWy=p.wy; }  // snapshot before move (streak tail)
     p.wx+=p.vx*dt; p.wy+=p.vy*dt;
     p.vx*=p.friction; p.vy*=p.friction;
     p.life-=p.decay*dt;
@@ -257,66 +258,103 @@ function updateParticles(dt){
 }
 
 // ─── WebGL Particle Renderer ──────────────────────────────────────────────────
-// Replaces 3-pass × 3500 arc() calls with ONE gl.drawArrays() call.
+// Pass A — GL_POINTS  : soft radial-glow blobs for burst/ring/trail particles
+// Pass B — GL_LINES   : head→tail streaks for hot spark particles (Geometry Wars look)
+// Pass C — GL_POINTS  : bright white-hot tips at spark heads
 const _glc = document.createElement('canvas');
-let _gl=null, _glProg=null, _glBuf=null, _glVerts=null;
+let _gl=null;
+// Point program  (7 floats/vert: x y size r g b a)
+let _glProg=null, _glBuf=null, _glVerts=null;
 let _glResLoc=null, _glLp=-1, _glLs=-1, _glLc=-1;
+// Line program   (6 floats/vert: x y r g b a)
+let _glProg2=null, _glBuf2=null, _glVerts2=null;
+let _glRL2=null, _glLA2=-1, _glLC2=-1;
 
 (function initGL(){
   try{
     _gl=_glc.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false,preserveDrawingBuffer:true});
     if(!_gl) return;
     const gl=_gl;
-    const vs=`attribute vec2 ap;attribute float asz;attribute vec4 ac;varying vec4 vc;uniform vec2 ur;void main(){vec2 cl=ap/ur*2.0-1.0;gl_Position=vec4(cl.x,-cl.y,0,1);gl_PointSize=asz;vc=ac;}`;
-    const fs=`precision mediump float;varying vec4 vc;void main(){float d=length(gl_PointCoord-vec2(.5))*2.;if(d>1.)discard;float a=pow(1.-d,2.)*vc.a;gl_FragColor=vec4(vc.rgb*a,a);}`;
     function mkS(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
+
+    // ── Program 1: GL_POINTS with radial soft glow ──
+    const vs1=`attribute vec2 ap;attribute float asz;attribute vec4 ac;varying vec4 vc;uniform vec2 ur;
+void main(){vec2 cl=ap/ur*2.0-1.0;gl_Position=vec4(cl.x,-cl.y,0,1);gl_PointSize=asz;vc=ac;}`;
+    const fs1=`precision mediump float;varying vec4 vc;
+void main(){float d=length(gl_PointCoord-vec2(.5))*2.;if(d>1.)discard;
+float a=pow(1.-d,2.)*vc.a;gl_FragColor=vec4(vc.rgb*a,a);}`;
     _glProg=gl.createProgram();
-    gl.attachShader(_glProg,mkS(gl.VERTEX_SHADER,vs));
-    gl.attachShader(_glProg,mkS(gl.FRAGMENT_SHADER,fs));
+    gl.attachShader(_glProg,mkS(gl.VERTEX_SHADER,vs1));
+    gl.attachShader(_glProg,mkS(gl.FRAGMENT_SHADER,fs1));
     gl.linkProgram(_glProg);
     _glBuf=gl.createBuffer();
-    _glVerts=new Float32Array(MAX_P*2*7); // 2 points/particle (halo+core), 7 floats each
+    _glVerts=new Float32Array(MAX_P*2*7);
     _glResLoc=gl.getUniformLocation(_glProg,'ur');
     _glLp=gl.getAttribLocation(_glProg,'ap');
     _glLs=gl.getAttribLocation(_glProg,'asz');
     _glLc=gl.getAttribLocation(_glProg,'ac');
-  }catch(e){_gl=null;console.warn('WebGL unavailable, using Canvas 2D particles');}
+
+    // ── Program 2: GL_LINES for spark streaks (head white-hot, tail dim enemy-color) ──
+    const vs2=`attribute vec2 ap;attribute vec4 ac;varying vec4 vc;uniform vec2 ur;
+void main(){vec2 cl=ap/ur*2.0-1.0;gl_Position=vec4(cl.x,-cl.y,0,1);vc=ac;}`;
+    const fs2=`precision mediump float;varying vec4 vc;
+void main(){gl_FragColor=vec4(vc.rgb*vc.a,vc.a);}`;
+    _glProg2=gl.createProgram();
+    gl.attachShader(_glProg2,mkS(gl.VERTEX_SHADER,vs2));
+    gl.attachShader(_glProg2,mkS(gl.FRAGMENT_SHADER,fs2));
+    gl.linkProgram(_glProg2);
+    _glBuf2=gl.createBuffer();
+    _glVerts2=new Float32Array(MAX_P*2*6); // 2 verts/spark × 6 floats
+    _glRL2=gl.getUniformLocation(_glProg2,'ur');
+    _glLA2=gl.getAttribLocation(_glProg2,'ap');
+    _glLC2=gl.getAttribLocation(_glProg2,'ac');
+  }catch(e){_gl=null;console.warn('WebGL unavailable, falling back to Canvas 2D');}
 })();
 
-// Re-bind all GL state — MUST be called after canvas resize (resize resets GL context!)
+// Bind point-program state (call after any resize or program switch)
 function _glBindState(){
   if(!_gl) return;
   const gl=_gl;
   gl.useProgram(_glProg);
   gl.bindBuffer(gl.ARRAY_BUFFER,_glBuf);
-  const stride=7*4;
+  const s=7*4;
   gl.enableVertexAttribArray(_glLp); gl.enableVertexAttribArray(_glLs); gl.enableVertexAttribArray(_glLc);
-  gl.vertexAttribPointer(_glLp,2,gl.FLOAT,false,stride,0);
-  gl.vertexAttribPointer(_glLs,1,gl.FLOAT,false,stride,8);
-  gl.vertexAttribPointer(_glLc,4,gl.FLOAT,false,stride,12);
+  gl.vertexAttribPointer(_glLp,2,gl.FLOAT,false,s,0);
+  gl.vertexAttribPointer(_glLs,1,gl.FLOAT,false,s,8);
+  gl.vertexAttribPointer(_glLc,4,gl.FLOAT,false,s,12);
   gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
+}
+// Bind line-program state
+function _glBindLine(){
+  if(!_gl||!_glProg2) return;
+  const gl=_gl;
+  gl.useProgram(_glProg2);
+  gl.bindBuffer(gl.ARRAY_BUFFER,_glBuf2);
+  const s=6*4;
+  gl.enableVertexAttribArray(_glLA2); gl.enableVertexAttribArray(_glLC2);
+  gl.vertexAttribPointer(_glLA2,2,gl.FLOAT,false,s,0);
+  gl.vertexAttribPointer(_glLC2,4,gl.FLOAT,false,s,8);
 }
 
 function _resizeGL(){
   if(!_gl) return;
-  _glc.width=W; _glc.height=H;      // ← resets GL context!
-  _glBindState();                     // ← restore all state
-  _gl.viewport(0,0,W,H);
-  _gl.uniform2f(_glResLoc,W,H);
+  _glc.width=W; _glc.height=H;  // resets GL context — must rebind everything
+  _glBindState(); _gl.viewport(0,0,W,H); _gl.uniform2f(_glResLoc,W,H);
+  if(_glProg2){ _glBindLine(); _gl.uniform2f(_glRL2,W,H); }
+  _glBindState(); // leave in point-program state
 }
 
 function drawParticles(){
   if(_gl && pActive>0){ _drawGL(); return; }
-  // ── Canvas 2D fallback ──────────────────────────────────────────────────────
-  ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.shadowBlur=0;
+  // ── Canvas 2D fallback ──
+  ctx.save(); ctx.globalCompositeOperation='lighter';
   for(let i=0;i<pActive;i++){
     const p=pool[i]; const sx=p.wx-camX,sy=p.wy-camY;
     if(sx<-80||sx>W+80||sy<-80||sy>H+80) continue;
     const sz=p.size*p.life; if(sz<0.4) continue;
     ctx.globalAlpha=p.life*0.09; ctx.fillStyle=`rgb(${p.r},${p.g},${p.b})`;
     ctx.beginPath(); ctx.arc(sx,sy,sz*7,0,TAU); ctx.fill();
-    ctx.globalAlpha=p.life*0.28;
-    ctx.beginPath(); ctx.arc(sx,sy,sz*2.8,0,TAU); ctx.fill();
+    ctx.globalAlpha=p.life*0.28; ctx.beginPath(); ctx.arc(sx,sy,sz*2.8,0,TAU); ctx.fill();
     ctx.globalAlpha=p.life*0.88; ctx.fillStyle=`rgb(${Math.min(255,p.r+70)},${Math.min(255,p.g+70)},${Math.min(255,p.b+70)})`;
     ctx.beginPath(); ctx.arc(sx,sy,sz,0,TAU); ctx.fill();
   }
@@ -326,28 +364,68 @@ function drawParticles(){
 function _drawGL(){
   const gl=_gl;
   gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+
+  // ── Pass A: GL_POINTS — burst/ring/trail particles (non-spark) ──────────────
+  _glBindState(); gl.uniform2f(_glResLoc,W,H);
   let vi=0;
-  // Halo pass: large soft bloom
-  for(let i=0;i<pActive;i++){
-    const p=pool[i]; const sx=p.wx-camX,sy=p.wy-camY;
+  for(let i=0;i<pActive;i++){           // halo
+    const p=pool[i]; if(p.spark) continue;
+    const sx=p.wx-camX,sy=p.wy-camY;
     if(sx<-100||sx>W+100||sy<-100||sy>H+100) continue;
     const sz=p.size*p.life; if(sz<0.4) continue;
     _glVerts[vi++]=sx; _glVerts[vi++]=sy; _glVerts[vi++]=sz*8.5;
     _glVerts[vi++]=p.r/255; _glVerts[vi++]=p.g/255; _glVerts[vi++]=p.b/255; _glVerts[vi++]=p.life*0.14;
   }
-  // Core pass: bright + whitened
-  for(let i=0;i<pActive;i++){
-    const p=pool[i]; const sx=p.wx-camX,sy=p.wy-camY;
+  for(let i=0;i<pActive;i++){           // bright core
+    const p=pool[i]; if(p.spark) continue;
+    const sx=p.wx-camX,sy=p.wy-camY;
     if(sx<-20||sx>W+20||sy<-20||sy>H+20) continue;
     const sz=p.size*p.life; if(sz<=0) continue;
     _glVerts[vi++]=sx; _glVerts[vi++]=sy; _glVerts[vi++]=sz*3.2;
     _glVerts[vi++]=Math.min(1,p.r/255+0.28); _glVerts[vi++]=Math.min(1,p.g/255+0.28);
     _glVerts[vi++]=Math.min(1,p.b/255+0.28); _glVerts[vi++]=p.life*0.92;
   }
-  if(vi===0) return;
-  gl.bufferData(gl.ARRAY_BUFFER,_glVerts.subarray(0,vi),gl.DYNAMIC_DRAW);
-  gl.drawArrays(gl.POINTS,0,vi/7);
-  // Blit onto main canvas with additive blending
+  if(vi>0){ gl.bufferData(gl.ARRAY_BUFFER,_glVerts.subarray(0,vi),gl.DYNAMIC_DRAW); gl.drawArrays(gl.POINTS,0,vi/7); }
+
+  // ── Pass B: GL_LINES — spark streaks (tail=dim enemy-color, head=white-hot) ─
+  if(_glProg2){
+    _glBindLine(); gl.uniform2f(_glRL2,W,H);
+    let vi2=0;
+    for(let i=0;i<pActive;i++){
+      const p=pool[i]; if(!p.spark) continue;
+      const sx=p.wx-camX, sy=p.wy-camY;
+      const px=p.prevWx-camX, py=p.prevWy-camY;
+      if(sx<-200&&px<-200||sx>W+200&&px>W+200) continue;
+      if(sy<-200&&py<-200||sy>H+200&&py>H+200) continue;
+      const l=p.life;
+      // tail vertex — dim enemy color (nearly invisible)
+      _glVerts2[vi2++]=px; _glVerts2[vi2++]=py;
+      _glVerts2[vi2++]=p.r/255*0.25; _glVerts2[vi2++]=p.g/255*0.25; _glVerts2[vi2++]=p.b/255*0.25; _glVerts2[vi2++]=l*0.04;
+      // head vertex — searing white (yellow-white for hot metal look)
+      _glVerts2[vi2++]=sx; _glVerts2[vi2++]=sy;
+      _glVerts2[vi2++]=1.0; _glVerts2[vi2++]=0.96; _glVerts2[vi2++]=0.80; _glVerts2[vi2++]=l*0.97;
+    }
+    if(vi2>0){ gl.bufferData(gl.ARRAY_BUFFER,_glVerts2.subarray(0,vi2),gl.DYNAMIC_DRAW); gl.drawArrays(gl.LINES,0,vi2/6); }
+
+    // ── Pass C: GL_POINTS — glowing tips at spark heads ──────────────────────
+    _glBindState(); gl.uniform2f(_glResLoc,W,H);
+    vi=0;
+    for(let i=0;i<pActive;i++){
+      const p=pool[i]; if(!p.spark) continue;
+      const sx=p.wx-camX, sy=p.wy-camY;
+      if(sx<-40||sx>W+40||sy<-40||sy>H+40) continue;
+      const sz=p.size*p.life, l=p.life;
+      // colored halo at tip
+      _glVerts[vi++]=sx; _glVerts[vi++]=sy; _glVerts[vi++]=sz*11;
+      _glVerts[vi++]=p.r/255; _glVerts[vi++]=p.g/255; _glVerts[vi++]=p.b/255; _glVerts[vi++]=l*0.13;
+      // white-hot core at tip
+      _glVerts[vi++]=sx; _glVerts[vi++]=sy; _glVerts[vi++]=sz*3.5;
+      _glVerts[vi++]=1.0; _glVerts[vi++]=0.98; _glVerts[vi++]=0.85; _glVerts[vi++]=l*0.90;
+    }
+    if(vi>0){ gl.bufferData(gl.ARRAY_BUFFER,_glVerts.subarray(0,vi),gl.DYNAMIC_DRAW); gl.drawArrays(gl.POINTS,0,vi/7); }
+  }
+
+  // Composite GL canvas onto main canvas (additive)
   ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.drawImage(_glc,0,0); ctx.restore();
 }
 
@@ -699,11 +777,11 @@ class Player{
     if(this.invincible>0) return false;
     this.alive=false;
     sfxPlayerDie();
-    spawnBurst(this.wx,this.wy,'#88aaff', 80,100,600,2,6);
-    spawnBurst(this.wx,this.wy,'#ffffff', 35, 50,300,1,3.5);
-    spawnShards(this.wx,this.wy,'#aabbff',20,500,1100);
-    spawnShards(this.wx,this.wy,'#ffffff',10,400, 800);
-    spawnRing  (this.wx,this.wy,'#88aaff',52,250,580);
+    spawnBurst(this.wx,this.wy,'#ffffff',  50, 80, 400, 3.0, 9.0);
+    spawnBurst(this.wx,this.wy,'#88aaff',  60, 60, 520, 2.0, 6.0);
+    spawnSparks(this.wx,this.wy,'#aabbff', 28, 600, 1300);
+    spawnSparks(this.wx,this.wy,'#ffffff', 14, 500, 1000);
+    spawnRing  (this.wx,this.wy,'#88aaff', 52, 250, 580);
     game.grid.push(this.wx,this.wy,25,350);
     return true;
   }
@@ -718,17 +796,16 @@ class Enemy{
 
   die(game){
     sfxExplode();
-    // Dense core flash — bright cluster at impact
-    spawnBurst(this.wx,this.wy, this.color, 110, 55, 580, 2,   6.5);
-    spawnBurst(this.wx,this.wy,'#ffffff',    50, 30, 300, 1,   3.5);
-    // Fast streamer shards — shoot far across the screen
-    spawnShards(this.wx,this.wy, this.color, 26, 420, 920);
-    spawnShards(this.wx,this.wy,'#ffffff',   14, 350, 750);
+    // Instant white-hot flash at impact point
+    spawnBurst(this.wx,this.wy,'#ffffff',    40, 80, 260, 2.5, 9.0);
+    // Colored core burst
+    spawnBurst(this.wx,this.wy, this.color,  55, 40, 320, 1.5, 5.5);
+    // HOT SPARKS — GL_LINES streaks, the signature GW effect
+    spawnSparks(this.wx,this.wy, this.color, 32, 600, 1380);
+    spawnSparks(this.wx,this.wy,'#ffffff',   16, 500, 1100);
     // Shockwave rings
-    spawnRing(this.wx,this.wy, this.color,   52, 220, 520);
-    spawnRing(this.wx,this.wy,'#ffffff',     26, 110, 300);
-    // Slow outer ghost ring (double-ripple effect)
-    spawnRing(this.wx,this.wy, this.color,   28,  70, 160);
+    spawnRing(this.wx,this.wy, this.color,   48, 200, 500);
+    spawnRing(this.wx,this.wy,'#ffffff',     22, 100, 270);
     // Grid ripple
     game.grid.push(this.wx,this.wy, 20, 200);
     game.addKill(this.pts);
@@ -1082,15 +1159,18 @@ class BlackHole extends Enemy{
   }
   die(game){
     sfxExplode(true);
-    spawnBurst(this.wx,this.wy,'#9900ff', 150, 80,600,1.5,7);
-    spawnBurst(this.wx,this.wy,'#ffffff',   70, 55,320,1,  5);
-    spawnBurst(this.wx,this.wy,'#ff88ff',   60, 65,420,1.3,6);
-    spawnShards(this.wx,this.wy,'#9900ff',  35,500,1100);
-    spawnShards(this.wx,this.wy,'#ff44ff',  20,400, 900);
-    spawnShards(this.wx,this.wy,'#ffffff',  15,350, 800);
-    spawnRing (this.wx,this.wy,'#9900ff',   60,230,600);
-    spawnRing (this.wx,this.wy,'#ffffff',   30,120,320);
-    spawnRing (this.wx,this.wy,'#ff44ff',   30, 80,200);
+    // Massive white flash
+    spawnBurst(this.wx,this.wy,'#ffffff',   60, 100, 400, 3.0, 9.0);
+    spawnBurst(this.wx,this.wy,'#9900ff',   80,  60, 580, 2.0, 6.5);
+    spawnBurst(this.wx,this.wy,'#ff88ff',   50,  50, 380, 1.5, 5.0);
+    // Dense hot spark storm
+    spawnSparks(this.wx,this.wy,'#9900ff',  40, 650, 1500);
+    spawnSparks(this.wx,this.wy,'#ff44ff',  24, 550, 1200);
+    spawnSparks(this.wx,this.wy,'#ffffff',  18, 480, 1050);
+    // Concentric shockwave rings
+    spawnRing (this.wx,this.wy,'#9900ff',   60, 230, 600);
+    spawnRing (this.wx,this.wy,'#ffffff',   30, 120, 320);
+    spawnRing (this.wx,this.wy,'#ff44ff',   30,  80, 200);
     game.grid.push(this.wx,this.wy,35,340);
     game.addKill(this.pts);
     this.alive=false;
