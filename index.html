@@ -187,7 +187,7 @@ class Grid {
 }
 
 // ─── Particles ────────────────────────────────────────────────────────────────
-const MAX_P = 6000;
+const MAX_P = 8000;
 const pool  = new Array(MAX_P);
 for(let i=0;i<MAX_P;i++) pool[i]={life:0, spark:false, prevWx:0, prevWy:0};
 let pActive = 0;
@@ -763,11 +763,11 @@ class Player{
     spawnBurst(this.wx,this.wy,'#ffffff',  70,110, 480, 3.5, 11.0);
     spawnBurst(this.wx,this.wy,'#88aaff',  80, 70, 600, 2.5,  8.0);
     spawnBurst(this.wx,this.wy,'#aaddff',  50, 55, 420, 2.0,  6.0);
-    spawnSparks(this.wx,this.wy,'#aabbff', 48,1000, 2900);
-    spawnSparks(this.wx,this.wy,'#ffffff', 24, 900, 2400);
-    spawnSparks(this.wx,this.wy,'#55aaff', 18, 800, 2000);
-    spawnEmbers(this.wx,this.wy,'#88aaff', 32,  28, 200);
-    spawnEmbers(this.wx,this.wy,'#ffffff', 16,  22, 140);
+    spawnSparks(this.wx,this.wy,'#aabbff', 72, 700, 2030);
+    spawnSparks(this.wx,this.wy,'#ffffff', 36, 630, 1680);
+    spawnSparks(this.wx,this.wy,'#55aaff', 27, 560, 1400);
+    spawnEmbers(this.wx,this.wy,'#88aaff', 48,  20, 140);
+    spawnEmbers(this.wx,this.wy,'#ffffff', 24,  15,  98);
     spawnRing  (this.wx,this.wy,'#88aaff', 60, 280, 640);
     spawnRing  (this.wx,this.wy,'#ffffff', 30, 140, 340);
     return true;
@@ -786,12 +786,12 @@ class Enemy{
     // Blinding white-hot flash
     spawnBurst(this.wx,this.wy,'#ffffff',    55,100, 320, 3.0, 10.0);
     spawnBurst(this.wx,this.wy, this.color,  65, 55, 380, 2.0,  6.5);
-    // Firework sparks — high speed, long life (5x), wide spread
-    spawnSparks(this.wx,this.wy, this.color, 44, 900, 2800);
-    spawnSparks(this.wx,this.wy,'#ffffff',   22, 800, 2200);
-    // Glowing embers — drift slowly, linger for many seconds
-    spawnEmbers(this.wx,this.wy, this.color, 22, 25, 180);
-    spawnEmbers(this.wx,this.wy,'#ffffff',   11, 20, 120);
+    // Firework sparks — speed ×0.7, count ×1.5
+    spawnSparks(this.wx,this.wy, this.color, 66, 630, 1960);
+    spawnSparks(this.wx,this.wy,'#ffffff',   33, 560, 1540);
+    // Glowing embers — count ×1.5
+    spawnEmbers(this.wx,this.wy, this.color, 33, 18, 126);
+    spawnEmbers(this.wx,this.wy,'#ffffff',   17, 14,  84);
     // Shockwave rings
     spawnRing(this.wx,this.wy, this.color,   52, 220, 540);
     spawnRing(this.wx,this.wy,'#ffffff',     26, 110, 290);
@@ -988,7 +988,7 @@ class SnakeBody extends Enemy{
     this.radius=8; this.color='#ff00ee'; this.pts=5;
   }
   update(dt,_p,grid){
-    if(!this.head.alive) return;
+    if(!this.head.alive){ this.alive=false; return; } // cascade: die with the head
     const idx=Math.min(this.head.history.length-1,this.delay);
     const pos=this.head.history[idx];
     if(pos){ this.wx=pos.wx; this.wy=pos.wy; }
@@ -1142,14 +1142,14 @@ class BlackHole extends Enemy{
     spawnBurst(this.wx,this.wy,'#ffffff',   90, 130, 550, 3.5, 11.0);
     spawnBurst(this.wx,this.wy,'#9900ff',  100,  80, 680, 2.5,  8.0);
     spawnBurst(this.wx,this.wy,'#ff88ff',   65,  65, 460, 2.0,  6.0);
-    // Massive firework spark storm — purple & pink
-    spawnSparks(this.wx,this.wy,'#9900ff',  55,1050,3200);
-    spawnSparks(this.wx,this.wy,'#ff44ff',  34, 950,2700);
-    spawnSparks(this.wx,this.wy,'#ffffff',  22, 850,2400);
-    // Long-lingering purple embers
-    spawnEmbers(this.wx,this.wy,'#9900ff',  40,  30, 220);
-    spawnEmbers(this.wx,this.wy,'#ff44ff',  20,  25, 160);
-    spawnEmbers(this.wx,this.wy,'#ffffff',  14,  20, 120);
+    // Massive firework spark storm — speed ×0.7, count ×1.5
+    spawnSparks(this.wx,this.wy,'#9900ff',  83, 735, 2240);
+    spawnSparks(this.wx,this.wy,'#ff44ff',  51, 660, 1890);
+    spawnSparks(this.wx,this.wy,'#ffffff',  33, 600, 1680);
+    // Long-lingering purple embers — count ×1.5
+    spawnEmbers(this.wx,this.wy,'#9900ff',  60,  21, 154);
+    spawnEmbers(this.wx,this.wy,'#ff44ff',  30,  18, 112);
+    spawnEmbers(this.wx,this.wy,'#ffffff',  21,  14,  84);
     // Concentric shockwave rings
     spawnRing (this.wx,this.wy,'#9900ff',   70, 250, 660);
     spawnRing (this.wx,this.wy,'#ffffff',   36, 130, 360);
@@ -1333,7 +1333,7 @@ class Game{
         this.enemies.push(head);
         const len=5+rInt(0,7);
         for(let j=0;j<len;j++)
-          this.enemies.push(new SnakeBody(head,(j+1)*14));
+          this.enemies.push(new SnakeBody(head,(j+1)*22));
       }
     } else if(evt==='ONSLAUGHT'){
       // All types at once
@@ -1343,7 +1343,7 @@ class Game{
       for(let i=0;i<2;i++)  this.enemies.push(new Shooter(...this.worldEdge()));
       const head=new SnakeHead(...this.worldEdge());
       this.enemies.push(head);
-      for(let j=0;j<5;j++) this.enemies.push(new SnakeBody(head,(j+1)*14));
+      for(let j=0;j<5;j++) this.enemies.push(new SnakeBody(head,(j+1)*22));
     } else if(evt==='KAMIKAZE'){
       const n=8+rInt(0,6);
       for(let i=0;i<n;i++){
@@ -1380,7 +1380,7 @@ class Game{
       this.enemies.push(head);
       const len=3+rInt(0,Math.min(this.wave,7));
       for(let i=0;i<len;i++)
-        this.enemies.push(new SnakeBody(head,(i+1)*14));
+        this.enemies.push(new SnakeBody(head,(i+1)*22));
     } else {
       // Shooter — unlocks after wave 3
       const n=(this.wave>=3) ? 1+rInt(0,2) : 1;
