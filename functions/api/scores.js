@@ -1,12 +1,16 @@
 // Cloudflare Pages Function — /api/scores
-// GET  → { scores: [{name,score,date},...] }  (top 100)
-// POST → { rank, scores }  (submit score, returns updated board)
+// GET  → { season, scores: [{name,score,date},...] }  (top 100)
+// POST → { season, rank, scores }  (submit score, returns updated board)
 //
 // KV binding "SCORES" must be created in the Pages dashboard:
 //   Pages project → Settings → Functions → KV namespace bindings
 //   Variable name: SCORES   KV namespace: <your namespace>
-
-const LB_KEY     = 'lb';
+//
+// ── シーズン管理 ──────────────────────────────────────────────────────────────
+// 大型アップデート時にここを 2, 3, … と増やすだけで新シーズン開始。
+// 旧シーズンのデータは KV に lb_s1, lb_s2 … として永久保存される。
+const SEASON      = 1;
+const LB_KEY      = `lb_s${SEASON}`;
 const MAX_ENTRIES = 100;
 const MAX_SCORE   = 100_000_000;
 
@@ -33,7 +37,7 @@ export async function onRequest({ request, env }) {
   // ── GET ──────────────────────────────────────────────────────────────────────
   if (request.method === 'GET') {
     const raw = await env.SCORES.get(LB_KEY);
-    return resp({ scores: raw ? JSON.parse(raw) : [] });
+    return resp({ season: SEASON, scores: raw ? JSON.parse(raw) : [] });
   }
 
   // ── POST ─────────────────────────────────────────────────────────────────────
@@ -70,7 +74,7 @@ export async function onRequest({ request, env }) {
 
     await env.SCORES.put(LB_KEY, JSON.stringify(scores));
 
-    return resp({ rank, scores });
+    return resp({ season: SEASON, rank, scores });
   }
 
   return resp({ error: 'Method not allowed' }, 405);

@@ -1301,6 +1301,7 @@ class Game{
     this.lbScores    = [];      // full top 100 for L-key view
     this.lbState     = 'idle';  // idle | loading | done | error
     this.lbPage      = 0;       // pagination (20 per page)
+    this.lbSeason    = 1;       // updated from API response
     this._prevState  = 'menu';
     // Event system
     this.gameTime        = 0;
@@ -1448,6 +1449,7 @@ class Game{
     }).then(r=>r.json()).then(data=>{
       this.submitRank=data.rank||0;
       this.topScores=(data.scores||[]).slice(0,10);
+      this.lbSeason=data.season||1;
       this.submitState='done';
     }).catch(()=>{ this.submitState='error'; });
   }
@@ -1457,6 +1459,7 @@ class Game{
     this.lbState='loading'; this.lbScores=[];
     fetch('/api/scores').then(r=>r.json()).then(data=>{
       this.lbScores=data.scores||[];
+      this.lbSeason=data.season||1;
       this.lbState='done';
     }).catch(()=>{ this.lbState='error'; });
   }
@@ -1901,7 +1904,7 @@ class Game{
     ctx.textAlign='center';
     ctx.font='bold 26px "Courier New",monospace';
     ctx.fillStyle='#aaccff'; ctx.shadowColor='#4488ff'; ctx.shadowBlur=22;
-    ctx.fillText('NEON VECTOR  TOP 100',W/2, 55);
+    ctx.fillText(`NEON VECTOR  TOP 100  — Season ${this.lbSeason}`,W/2, 55);
     ctx.shadowBlur=0;
 
     const PER_PAGE=20, total=this.lbScores.length;
