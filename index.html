@@ -33,9 +33,28 @@ let camX = 0, camY = 0;
 const keys  = Object.create(null);
 const mouse = { x: 0, y: 0, down: false };
 
-let _bombPressed=false;
-window.addEventListener('keydown',   e => { keys[e.code] = true; if(e.code==='KeyM') toggleMute(); if(e.code==='Space') _bombPressed=true; e.preventDefault(); });
-window.addEventListener('keyup',     e => { keys[e.code] = false; });
+let _bombPressed=false, _lPressed=false;
+window.addEventListener('keydown', e => {
+  // ── Name input mode (game over, waiting for name entry) ──────────────────
+  if(game && game.state==='gameover' && game.submitState==='idle'){
+    if(e.code==='Backspace'){ game.playerName=game.playerName.slice(0,-1); e.preventDefault(); return; }
+    if(e.code==='Enter'){ game.playerName.length>0 ? game.submitScore() : startGame(); e.preventDefault(); return; }
+    if(e.code==='Space'){ startGame(); e.preventDefault(); return; }   // skip without submitting
+    if(e.key.length===1 && /[A-Za-z0-9]/.test(e.key) && game.playerName.length<12){
+      game.playerName+=e.key.toUpperCase(); e.preventDefault(); return;
+    }
+    e.preventDefault(); return;
+  }
+  // ── Leaderboard overlay: any key closes ────────────────────────────────────
+  if(game && game.state==='leaderboard'){ game.state=game._prevState||'menu'; e.preventDefault(); return; }
+  // ── Normal game input ─────────────────────────────────────────────────────
+  keys[e.code]=true;
+  if(e.code==='KeyM') toggleMute();
+  if(e.code==='Space') _bombPressed=true;
+  if(e.code==='KeyL') _lPressed=true;
+  e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
 canvas.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
 canvas.addEventListener('mousedown', e => { if(e.button===0){mouse.down=true;} e.preventDefault(); });
 canvas.addEventListener('mouseup',   e => { if(e.button===0) mouse.down=false; });
@@ -1272,8 +1291,17 @@ class Game{
     this.wave    = 0;
     this.flashT  = 0;
     this.borderG = 0;
-    this.bombCharge   = 1;   // 1=ready, 0=on cooldown
-    this.bombCooldown = 0;   // seconds remaining until recharged
+    this.bombCharge   = 1;
+    this.bombCooldown = 0;
+    // Leaderboard / score submission
+    this.playerName  = '';
+    this.submitState = 'idle';  // idle | submitting | done | error
+    this.submitRank  = 0;
+    this.topScores   = [];      // top 10 returned after POST
+    this.lbScores    = [];      // full top 100 for L-key view
+    this.lbState     = 'idle';  // idle | loading | done | error
+    this.lbPage      = 0;       // pagination (20 per page)
+    this._prevState  = 'menu';
     // Event system
     this.gameTime        = 0;
     this.eventTimer      = 22;   // seconds until first event
@@ -1410,6 +1438,29 @@ class Game{
     camY=clamp(camY,0,Math.max(0,WORLD_H-H));
   }
 
+  submitScore(){
+    if(this.submitState!=='idle'||this.playerName.length===0) return;
+    this.submitState='submitting';
+    fetch('/api/scores',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:this.playerName,score:this.score})
+    }).then(r=>r.json()).then(data=>{
+      this.submitRank=data.rank||0;
+      this.topScores=(data.scores||[]).slice(0,10);
+      this.submitState='done';
+    }).catch(()=>{ this.submitState='error'; });
+  }
+
+  loadLeaderboard(){
+    if(this.lbState==='loading') return;
+    this.lbState='loading'; this.lbScores=[];
+    fetch('/api/scores').then(r=>r.json()).then(data=>{
+      this.lbScores=data.scores||[];
+      this.lbState='done';
+    }).catch(()=>{ this.lbState='error'; });
+  }
+
   useBomb(){
     this.bombCharge=0; this.bombCooldown=20;
     // Kill every enemy on screen with its own mini-explosion
@@ -1435,7 +1486,16 @@ class Game{
   }
 
   update(dt){
-    if(this.state==='gameover') return;
+    if(this.state==='gameover'||this.state==='leaderboard') return;
+
+    // Leaderboard toggle (L key — only from menu or gameover)
+    if(_lPressed){ _lPressed=false;
+      if(this.state==='leaderboard'){ this.state=this._prevState||'menu'; }
+      else if(this.state==='menu'||this.state==='gameover'){
+        this._prevState=this.state; this.state='leaderboard';
+        this.lbPage=0; this.loadLeaderboard();
+      }
+    }
 
     // Bomb input (consume flag set by keydown)
     if(_bombPressed){
@@ -1734,17 +1794,76 @@ class Game{
 
   drawGameOver(){
     ctx.save();
-    ctx.fillStyle='rgba(0,0,0,0.74)'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(0,0,0,0.82)'; ctx.fillRect(0,0,W,H);
     ctx.textAlign='center';
-    ctx.font='bold 68px "Courier New",monospace';
-    ctx.fillStyle='#ff1133'; ctx.shadowColor='#ff0000'; ctx.shadowBlur=35;
-    ctx.fillText('GAME OVER',W/2,H/2-60);
-    ctx.font='26px "Courier New",monospace';
-    ctx.fillStyle='#ddddff'; ctx.shadowColor='#aabbff'; ctx.shadowBlur=14;
-    ctx.fillText(`SCORE  ${String(this.score).padStart(9,'0')}`,W/2,H/2+14);
-    ctx.fillText(`HI     ${String(this.hi).padStart(9,'0')}`,W/2,H/2+52);
-    ctx.font='17px "Courier New",monospace'; ctx.fillStyle='#667799'; ctx.shadowBlur=4;
-    ctx.fillText('Click or press SPACE to retry',W/2,H/2+106);
+
+    // ── Title ──
+    ctx.font='bold 60px "Courier New",monospace';
+    ctx.fillStyle='#ff1133'; ctx.shadowColor='#ff0000'; ctx.shadowBlur=32;
+    ctx.fillText('GAME OVER',W/2, H*0.17);
+
+    // ── Score ──
+    ctx.font='22px "Courier New",monospace';
+    ctx.fillStyle='#ddddff'; ctx.shadowColor='#aabbff'; ctx.shadowBlur=12;
+    ctx.fillText(`SCORE  ${String(this.score).padStart(9,'0')}`,W/2, H*0.27);
+    ctx.font='13px "Courier New",monospace'; ctx.fillStyle='#667799'; ctx.shadowBlur=4;
+    ctx.fillText(`HI     ${String(this.hi).padStart(9,'0')}`,W/2, H*0.33);
+
+    const cy = H*0.44;
+
+    if(this.submitState==='idle'){
+      // ── Name input ──
+      ctx.font='13px "Courier New",monospace'; ctx.fillStyle='#556688'; ctx.shadowBlur=0;
+      ctx.fillText('── RANKING に登録する ──',W/2, cy-22);
+      // Input box
+      const bw=280, bh=36, bx=W/2-bw/2, by=cy-4;
+      ctx.fillStyle='rgba(0,10,40,0.85)';
+      ctx.fillRect(bx,by,bw,bh);
+      ctx.strokeStyle='#3355bb'; ctx.lineWidth=1.5;
+      ctx.strokeRect(bx,by,bw,bh);
+      // Typed name + blinking cursor
+      const cursor=(Date.now()%900)<450?'█':'';
+      ctx.font='bold 22px "Courier New",monospace';
+      ctx.fillStyle='#aaccff'; ctx.shadowColor='#4466ff'; ctx.shadowBlur=10;
+      ctx.fillText(this.playerName+cursor, W/2, cy+24);
+      ctx.shadowBlur=0;
+      ctx.font='11px "Courier New",monospace'; ctx.fillStyle='#445566';
+      ctx.fillText('A–Z 0–9 で入力  ／  ENTER: 登録  ／  SPACE: スキップ',W/2, cy+52);
+    } else if(this.submitState==='submitting'){
+      ctx.font='18px "Courier New",monospace'; ctx.fillStyle='#aaaaff'; ctx.shadowBlur=0;
+      ctx.fillText('送信中…',W/2, cy+20);
+    } else if(this.submitState==='error'){
+      ctx.font='15px "Courier New",monospace'; ctx.fillStyle='#ff6644'; ctx.shadowBlur=0;
+      ctx.fillText('接続エラー  (サーバーに繋がりません)',W/2, cy);
+    } else if(this.submitState==='done'){
+      // ── Rank ──
+      const rankStr = this.submitRank>0 ? `🏆  ${this.submitRank}位` : 'TOP 100 外';
+      ctx.font='bold 26px "Courier New",monospace';
+      ctx.fillStyle='#ffee44'; ctx.shadowColor='#ffcc00'; ctx.shadowBlur=22;
+      ctx.fillText(rankStr, W/2, cy);
+      // Top 10 preview
+      ctx.font='12px "Courier New",monospace'; ctx.shadowBlur=0;
+      this.topScores.forEach((s,i)=>{
+        const hi=(s.name===this.playerName&&s.score===this.score);
+        ctx.fillStyle = hi ? '#ffee44' : '#889aaa';
+        const r=String(i+1).padStart(3,' ');
+        const nm=s.name.padEnd(12,' ');
+        const sc=String(s.score).padStart(9,'0');
+        ctx.fillText(`${r}.  ${nm}  ${sc}`,W/2, cy+26+i*17);
+      });
+    }
+
+    // ── Bottom hint ──
+    ctx.font='14px "Courier New",monospace'; ctx.shadowBlur=0;
+    ctx.fillStyle='rgba(100,120,160,0.80)';
+    const hint = (this.submitState==='idle')
+      ? ''
+      : 'SPACE またはクリックで再スタート  ／  L: ランキング';
+    ctx.fillText(hint, W/2, H*0.94);
+    if(this.submitState!=='idle'){
+      ctx.fillStyle='rgba(60,80,120,0.5)';
+      ctx.fillText('L キーで上位100位を表示',W/2, H*0.98);
+    }
     ctx.restore();
   }
 
@@ -1765,6 +1884,7 @@ class Game{
     ctx.fillText('Mouse ── 照準 & クリックで射撃',        W/2, H/2+42);
     ctx.fillText('SPACE ── 爆弾（全敵一掃、20秒クールダウン）',W/2, H/2+68);
     ctx.fillText('M ── ミュート / ミュート解除',              W/2, H/2+94);
+    ctx.fillText('L ── ランキング表示',                       W/2, H/2+120);
 
     const pulse=0.5+0.5*Math.sin(Date.now()/550);
     ctx.font='21px "Courier New",monospace';
@@ -1772,6 +1892,55 @@ class Game{
     ctx.globalAlpha=0.5+pulse*0.5;
     ctx.fillText('Click or press any key to start',W/2,H/2+106);
     ctx.globalAlpha=1;
+    ctx.restore();
+  }
+
+  drawLeaderboard(){
+    ctx.save();
+    ctx.fillStyle='rgba(0,0,15,0.92)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center';
+    ctx.font='bold 26px "Courier New",monospace';
+    ctx.fillStyle='#aaccff'; ctx.shadowColor='#4488ff'; ctx.shadowBlur=22;
+    ctx.fillText('NEON VECTOR  TOP 100',W/2, 55);
+    ctx.shadowBlur=0;
+
+    const PER_PAGE=20, total=this.lbScores.length;
+    const pages=Math.max(1,Math.ceil(Math.min(total,100)/PER_PAGE));
+
+    if(this.lbState==='loading'){
+      ctx.font='16px "Courier New",monospace'; ctx.fillStyle='#667799';
+      ctx.fillText('読み込み中…',W/2, H/2);
+    } else if(this.lbState==='error'){
+      ctx.font='16px "Courier New",monospace'; ctx.fillStyle='#ff6644';
+      ctx.fillText('接続エラー',W/2, H/2);
+    } else {
+      const start=this.lbPage*PER_PAGE;
+      const slice=this.lbScores.slice(start, start+PER_PAGE);
+      const rowH=Math.min(26, (H-120)/PER_PAGE);
+      ctx.font=`${Math.max(11,rowH*0.58)|0}px "Courier New",monospace`;
+      slice.forEach((s,i)=>{
+        const rank=start+i+1;
+        const y=85+i*rowH;
+        const medal = rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':'';
+        ctx.fillStyle = rank<=3 ? '#ffee44' : rank<=10 ? '#aaddff' : '#778899';
+        const r=String(rank).padStart(3,' ');
+        const nm=s.name.padEnd(12,' ');
+        const sc=String(s.score).padStart(9,'0');
+        ctx.fillText(`${medal}${r}.  ${nm}  ${sc}  ${s.date}`,W/2, y);
+      });
+      // Pagination
+      ctx.font='13px "Courier New",monospace'; ctx.fillStyle='#556688';
+      ctx.fillText(`${this.lbPage+1} / ${pages} ページ  （← → または A D でページ切替）`,W/2, H-44);
+      // Handle left/right navigation
+      if(keys['ArrowRight']||keys['KeyD']){
+        if(!this._lbNavCd){ this._lbNavCd=true; this.lbPage=Math.min(this.lbPage+1,pages-1); setTimeout(()=>this._lbNavCd=false,200); }
+      } else if(keys['ArrowLeft']||keys['KeyA']){
+        if(!this._lbNavCd){ this._lbNavCd=true; this.lbPage=Math.max(this.lbPage-1,0); setTimeout(()=>this._lbNavCd=false,200); }
+      } else { this._lbNavCd=false; }
+    }
+
+    ctx.font='12px "Courier New",monospace'; ctx.fillStyle='#445566';
+    ctx.fillText('任意のキー またはクリックで閉じる',W/2, H-18);
     ctx.restore();
   }
 
@@ -1803,6 +1972,7 @@ class Game{
     if(this.state==='playing'||this.state==='dead') this.drawEventAnnouncement();
     if(this.state==='gameover') this.drawGameOver();
     if(this.state==='menu')     this.drawMenu();
+    if(this.state==='leaderboard') this.drawLeaderboard();
   }
 }
 
@@ -1819,8 +1989,14 @@ function startGame(){
     if(_ac) _ac.resume().then(startBGM).catch(startBGM);
   }
 }
-window.addEventListener('keydown', e=>{ if(game.state==='menu'||game.state==='gameover') startGame(); });
-canvas.addEventListener('click',   ()=>{ if(game.state==='menu'||game.state==='gameover') startGame(); });
+canvas.addEventListener('click', ()=>{
+  if(game.state==='leaderboard'){ game.state=game._prevState||'menu'; return; }
+  if(game.state==='gameover' && game.submitState==='idle'){
+    game.playerName.length>0 ? game.submitScore() : startGame(); return;
+  }
+  if(game.state==='gameover' && (game.submitState==='done'||game.submitState==='error')){ startGame(); return; }
+  if(game.state==='menu') startGame();
+});
 
 // ─── Loop ─────────────────────────────────────────────────────────────────────
 let lastT=0;
