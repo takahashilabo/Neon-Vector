@@ -1817,7 +1817,7 @@ class Game{
     if(this.submitState==='idle'){
       // ── Name input ──
       ctx.font='13px "Courier New",monospace'; ctx.fillStyle='#556688'; ctx.shadowBlur=0;
-      ctx.fillText('── RANKING に登録する ──',W/2, cy-22);
+      ctx.fillText('── SUBMIT YOUR SCORE ──',W/2, cy-22);
       // Input box
       const bw=280, bh=36, bx=W/2-bw/2, by=cy-4;
       ctx.fillStyle='rgba(0,10,40,0.85)';
@@ -1831,16 +1831,16 @@ class Game{
       ctx.fillText(this.playerName+cursor, W/2, cy+24);
       ctx.shadowBlur=0;
       ctx.font='11px "Courier New",monospace'; ctx.fillStyle='#445566';
-      ctx.fillText('A–Z 0–9 で入力  ／  ENTER: 登録  ／  SPACE: スキップ',W/2, cy+52);
+      ctx.fillText('A–Z 0–9 to type  /  ENTER: Submit  /  SPACE: Skip',W/2, cy+52);
     } else if(this.submitState==='submitting'){
       ctx.font='18px "Courier New",monospace'; ctx.fillStyle='#aaaaff'; ctx.shadowBlur=0;
-      ctx.fillText('送信中…',W/2, cy+20);
+      ctx.fillText('Submitting...',W/2, cy+20);
     } else if(this.submitState==='error'){
       ctx.font='15px "Courier New",monospace'; ctx.fillStyle='#ff6644'; ctx.shadowBlur=0;
-      ctx.fillText('接続エラー  (サーバーに繋がりません)',W/2, cy);
+      ctx.fillText('Connection error  (server unavailable)',W/2, cy);
     } else if(this.submitState==='done'){
       // ── Rank ──
-      const rankStr = this.submitRank>0 ? `🏆  ${this.submitRank}位` : 'TOP 100 外';
+      const rankStr = this.submitRank>0 ? `🏆  Rank #${this.submitRank}` : 'Not in Top 100';
       ctx.font='bold 26px "Courier New",monospace';
       ctx.fillStyle='#ffee44'; ctx.shadowColor='#ffcc00'; ctx.shadowBlur=22;
       ctx.fillText(rankStr, W/2, cy);
@@ -1861,11 +1861,11 @@ class Game{
     ctx.fillStyle='rgba(100,120,160,0.80)';
     const hint = (this.submitState==='idle')
       ? ''
-      : 'SPACE またはクリックで再スタート  ／  L: ランキング';
+      : 'SPACE or click to play again  /  L: Leaderboard';
     ctx.fillText(hint, W/2, H*0.94);
     if(this.submitState!=='idle'){
       ctx.fillStyle='rgba(60,80,120,0.5)';
-      ctx.fillText('L キーで上位100位を表示',W/2, H*0.98);
+      ctx.fillText('Press L to view Top 100 leaderboard',W/2, H*0.98);
     }
     ctx.restore();
   }
@@ -1882,12 +1882,12 @@ class Game{
     ctx.fillText('A Geometry Wars-like Shooter',W/2,H/2-52);
 
     ctx.font='16px "Courier New",monospace'; ctx.shadowBlur=6; ctx.fillStyle='#8899aa';
-    ctx.fillText('WASD ── 移動 (自機が向きを変える)',    W/2, H/2-10);
-    ctx.fillText('Arrow Keys ── 射撃方向 (移動と独立)',   W/2, H/2+16);
-    ctx.fillText('Mouse ── 照準 & クリックで射撃',        W/2, H/2+42);
-    ctx.fillText('SPACE ── 爆弾（全敵一掃、20秒クールダウン）',W/2, H/2+68);
-    ctx.fillText('M ── ミュート / ミュート解除',              W/2, H/2+94);
-    ctx.fillText('L ── ランキング表示',                       W/2, H/2+120);
+    ctx.fillText('WASD ── Move  (ship faces movement direction)', W/2, H/2-10);
+    ctx.fillText('Arrow Keys ── Aim & shoot  (independent)',      W/2, H/2+16);
+    ctx.fillText('Mouse ── Aim & click to shoot',                 W/2, H/2+42);
+    ctx.fillText('SPACE ── Bomb  (clears all enemies, 20s cooldown)', W/2, H/2+68);
+    ctx.fillText('M ── Mute / Unmute',                            W/2, H/2+94);
+    ctx.fillText('L ── Leaderboard',                              W/2, H/2+120);
 
     const pulse=0.5+0.5*Math.sin(Date.now()/550);
     ctx.font='21px "Courier New",monospace';
@@ -1912,10 +1912,10 @@ class Game{
 
     if(this.lbState==='loading'){
       ctx.font='16px "Courier New",monospace'; ctx.fillStyle='#667799';
-      ctx.fillText('読み込み中…',W/2, H/2);
+      ctx.fillText('Loading...',W/2, H/2);
     } else if(this.lbState==='error'){
       ctx.font='16px "Courier New",monospace'; ctx.fillStyle='#ff6644';
-      ctx.fillText('接続エラー',W/2, H/2);
+      ctx.fillText('Connection error',W/2, H/2);
     } else {
       const start=this.lbPage*PER_PAGE;
       const slice=this.lbScores.slice(start, start+PER_PAGE);
@@ -1933,7 +1933,7 @@ class Game{
       });
       // Pagination
       ctx.font='13px "Courier New",monospace'; ctx.fillStyle='#556688';
-      ctx.fillText(`${this.lbPage+1} / ${pages} ページ  （← → または A D でページ切替）`,W/2, H-44);
+      ctx.fillText(`Page ${this.lbPage+1} of ${pages}  ( ← → or A D to navigate )`,W/2, H-44);
       // Handle left/right navigation
       if(keys['ArrowRight']||keys['KeyD']){
         if(!this._lbNavCd){ this._lbNavCd=true; this.lbPage=Math.min(this.lbPage+1,pages-1); setTimeout(()=>this._lbNavCd=false,200); }
@@ -1943,7 +1943,7 @@ class Game{
     }
 
     ctx.font='12px "Courier New",monospace'; ctx.fillStyle='#445566';
-    ctx.fillText('任意のキー またはクリックで閉じる',W/2, H-18);
+    ctx.fillText('Press any key or click to close',W/2, H-18);
     ctx.restore();
   }
 
