@@ -43,7 +43,6 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 function resize() {
   W = canvas.width  = Math.max(480, document.documentElement.clientWidth  || window.innerWidth  || 800);
   H = canvas.height = Math.max(320, document.documentElement.clientHeight || window.innerHeight || 600);
-  if(grid) grid.resize();
   _resizeGL();
 }
 window.addEventListener('resize', resize);
@@ -313,7 +312,10 @@ function _resizeGL(){
 }
 
 function drawParticles(){
-  if(_gl && pActive>0){ _drawGL(); return; }
+  if(_gl && pActive>0){
+    if(_glc.width!==W||_glc.height!==H) _resizeGL(); // guard: sync if resize was missed
+    _drawGL(); return;
+  }
   // ── Canvas 2D fallback ──
   ctx.save(); ctx.globalCompositeOperation='lighter';
   for(let i=0;i<pActive;i++){
