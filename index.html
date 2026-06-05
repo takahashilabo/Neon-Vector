@@ -215,27 +215,33 @@ function spawnBurst(wx,wy,hex,count,sMin=80,sMax=320,szMin=1.5,szMax=5){
 
 // Hot metal sparks — multi-step GL_POINTS streak trail, long-lived
 // Low decay (5x longer than before) + low friction = travels far, fades slowly
-function spawnSparks(wx,wy,hex,count=32,spMin=450,spMax=1400){
+// impactAngle: bullet travel direction (Math.atan2(vy,vx)).
+// When set, sparks fly in a ±75° forward cone — physically correct impact splash.
+// null → full 360° (used for bomb / non-directional deaths).
+function spawnSparks(wx,wy,hex,count=32,spMin=450,spMax=1400,impactAngle=null){
   const r=parseInt(hex.slice(1,3),16);
   const g=parseInt(hex.slice(3,5),16);
   const b=parseInt(hex.slice(5,7),16);
+  const hs=Math.PI*0.42; // half-spread ≈ ±75°
   for(let i=0;i<count;i++){
-    const sp=rand(spMin,spMax), a=rand(0,TAU);
+    const sp=rand(spMin,spMax);
+    const a=(impactAngle!==null) ? impactAngle+rand(-hs,hs) : rand(0,TAU);
     _addParticle(wx,wy, Math.cos(a)*sp, Math.sin(a)*sp,
                  r,g,b, rand(1.5,3.5), rand(0.075,0.135), 0.991, true);
   }
 }
 
-// Glowing embers — very slow drift, ultra-long life, soft glow blobs (non-streak)
-// Simulate the lingering glow after a firework burst
-function spawnEmbers(wx,wy,hex,count=20,spMin=12,spMax=80){
+// Glowing embers — slow drift with ±90° cone when directional
+function spawnEmbers(wx,wy,hex,count=20,spMin=12,spMax=80,impactAngle=null){
   const r=parseInt(hex.slice(1,3),16);
   const g=parseInt(hex.slice(3,5),16);
   const b=parseInt(hex.slice(5,7),16);
+  const hs=Math.PI*0.5; // half-spread ±90°
   for(let i=0;i<count;i++){
-    const sp=rand(spMin,spMax), a=rand(0,TAU);
+    const sp=rand(spMin,spMax);
+    const a=(impactAngle!==null) ? impactAngle+rand(-hs,hs) : rand(0,TAU);
     _addParticle(wx,wy, Math.cos(a)*sp, Math.sin(a)*sp,
-                 r,g,b, rand(3,7), rand(0.048,0.090), 0.996); // 11-21 second life
+                 r,g,b, rand(3,7), rand(0.048,0.090), 0.996);
   }
 }
 
@@ -782,17 +788,16 @@ class Enemy{
   get screenY(){ return this.wy-camY; }
   inView(pad=60){ const sx=this.screenX,sy=this.screenY; return sx>-pad&&sx<W+pad&&sy>-pad&&sy<H+pad; }
 
-  die(game){
+  die(game, impactAngle=null){
     sfxExplode();
-    // Blinding white-hot flash
+    // Omnidirectional flash (explosion origin)
     spawnBurst(this.wx,this.wy,'#ffffff',    55,100, 320, 3.0, 10.0);
     spawnBurst(this.wx,this.wy, this.color,  65, 55, 380, 2.0,  6.5);
-    // Firework sparks — speed ×0.7, count ×1.5
-    spawnSparks(this.wx,this.wy, this.color, 66, 315,  980);
-    spawnSparks(this.wx,this.wy,'#ffffff',   33, 280,  770);
-    // Glowing embers
-    spawnEmbers(this.wx,this.wy, this.color, 33,   9,  63);
-    spawnEmbers(this.wx,this.wy,'#ffffff',   17,   7,  42);
+    // Sparks & embers fly in bullet's travel direction
+    spawnSparks(this.wx,this.wy, this.color, 66, 315,  980, impactAngle);
+    spawnSparks(this.wx,this.wy,'#ffffff',   33, 280,  770, impactAngle);
+    spawnEmbers(this.wx,this.wy, this.color, 33,   9,  63, impactAngle);
+    spawnEmbers(this.wx,this.wy,'#ffffff',   17,   7,  42, impactAngle);
     // Shockwave rings
     spawnRing(this.wx,this.wy, this.color,   52, 220, 540);
     spawnRing(this.wx,this.wy,'#ffffff',     26, 110, 290);
@@ -1129,28 +1134,27 @@ class BlackHole extends Enemy{
     if(Math.random()<0.25) spawnTrail(this.wx,this.wy,'#cc44ff',rand(1,2.2));
   }
   // Returns true if dead (called from collision handler)
-  hit(game){
+  hit(game, impactAngle=null){
     this.hp--;
     sfxBlackHoleHit();
     spawnBurst(this.wx,this.wy,'#cc44ff',14,20,130,0.7,2.8);
     game.grid.push(this.wx,this.wy,-14,90);
-    if(this.hp<=0){ this.die(game); return true; }
+    if(this.hp<=0){ this.die(game, impactAngle); return true; }
     return false;
   }
-  die(game){
+  die(game, impactAngle=null){
     sfxExplode(true);
-    // Blinding supernova flash
+    // Omnidirectional supernova flash
     spawnBurst(this.wx,this.wy,'#ffffff',   90, 130, 550, 3.5, 11.0);
     spawnBurst(this.wx,this.wy,'#9900ff',  100,  80, 680, 2.5,  8.0);
     spawnBurst(this.wx,this.wy,'#ff88ff',   65,  65, 460, 2.0,  6.0);
-    // Massive firework spark storm — speed ×0.7, count ×1.5
-    spawnSparks(this.wx,this.wy,'#9900ff',  83, 370, 1120);
-    spawnSparks(this.wx,this.wy,'#ff44ff',  51, 330,  945);
-    spawnSparks(this.wx,this.wy,'#ffffff',  33, 300,  840);
-    // Long-lingering purple embers
-    spawnEmbers(this.wx,this.wy,'#9900ff',  60,  10,  77);
-    spawnEmbers(this.wx,this.wy,'#ff44ff',  30,   9,  56);
-    spawnEmbers(this.wx,this.wy,'#ffffff',  21,   7,  42);
+    // Sparks & embers in bullet direction
+    spawnSparks(this.wx,this.wy,'#9900ff',  83, 370, 1120, impactAngle);
+    spawnSparks(this.wx,this.wy,'#ff44ff',  51, 330,  945, impactAngle);
+    spawnSparks(this.wx,this.wy,'#ffffff',  33, 300,  840, impactAngle);
+    spawnEmbers(this.wx,this.wy,'#9900ff',  60,  10,  77, impactAngle);
+    spawnEmbers(this.wx,this.wy,'#ff44ff',  30,   9,  56, impactAngle);
+    spawnEmbers(this.wx,this.wy,'#ffffff',  21,   7,  42, impactAngle);
     // Concentric shockwave rings
     spawnRing (this.wx,this.wy,'#9900ff',   70, 250, 660);
     spawnRing (this.wx,this.wy,'#ffffff',   36, 130, 360);
@@ -1515,9 +1519,10 @@ class Game{
       for(const e of this.enemies){
         if(!e.alive) continue;
         if(hypot(b.wx-e.wx,b.wy-e.wy)<e.radius+5){
+          const impactAngle=Math.atan2(b.vy,b.vx); // bullet travel direction
           b.alive=false;
-          if(e instanceof BlackHole) e.hit(this);
-          else e.die(this);
+          if(e instanceof BlackHole) e.hit(this, impactAngle);
+          else e.die(this, impactAngle);
           break;
         }
       }
