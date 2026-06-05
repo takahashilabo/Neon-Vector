@@ -663,13 +663,13 @@ class Player{
     if(this.moving){
       const len=hypot(mx,my);
       const spd=432;
-      this.vx+=(mx/len*spd-this.vx)*dt*8;
-      this.vy+=(my/len*spd-this.vy)*dt*8;
+      this.vx+=(mx/len*spd-this.vx)*dt*5.5;  // softer acceleration
+      this.vy+=(my/len*spd-this.vy)*dt*5.5;
       this.moveAngle=Math.atan2(my/len,mx/len);
       this.thrustT+=dt;
     } else {
-      this.vx*=1-dt*9;
-      this.vy*=1-dt*9;
+      this.vx*=1-dt*2.8;  // slow space-drag (was 9 → 2.8, ~3× more glide)
+      this.vy*=1-dt*2.8;
     }
 
     this.wx=clamp(this.wx+this.vx*dt, this.radius, WORLD_W-this.radius);
